@@ -17,9 +17,8 @@ def signal_to_alert_dict(signal: StratSignal) -> Dict[str, Any]:
     Convert a StratSignal into a canonical alert dict for logging or downstream use.
     Timestamp is formatted in US/Eastern (America/New_York).
     """
-    now_est = datetime.now(ZoneInfo("America/New_York"))
-    # Example: "Jan 09, 2026 · 08:37 PM ET"
-    now_pretty = now_est.strftime("%b %d, %Y · %I:%M %p ET")
+    et = ZoneInfo("America/New_York")
+    now_pretty = signal.created_at.astimezone(et).strftime("%m-%d-%Y · %I:%M %p ET")
 
     return {
         "timestamp": now_pretty,
@@ -98,18 +97,22 @@ def format_signal_message(signal: StratSignal) -> str:
         f"🕒 TF: {tf} (Bias: {btf})\n"
         f"📈 Direction: {dirn}\n\n"
         f"📊 Levels\n"
+        f"• Current $: {under:.2f}\n"
         f"• Entry: {entry:.2f}\n"
         f"• Stop: {stop:.2f}\n"
-        f"• Underlying: {under:.2f}\n"
     )
 
     if target is not None:
         core += f"• Target: {target:.2f}\n"
 
     if has_option:
+        exp = opt.get("expiration")
+        formatted_exp = (
+            datetime.fromisoformat(exp).strftime("%m-%d-%Y") if exp else exp
+        )
         opt_line = (
             f"\n📝 Option Idea\n"
-            f"• {opt.get('type', '').upper()} {opt.get('strike'):.2f} exp {opt.get('expiration')}\n"
+            f"• {opt.get('type', '').upper()} {opt.get('strike'):.2f} exp {formatted_exp}\n"
             f"• Bid/Ask: {opt.get('bid', 0.0):.2f} / {opt.get('ask', 0.0):.2f}\n"
         )
         iv_val = opt.get("iv")
