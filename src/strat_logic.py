@@ -125,6 +125,22 @@ def detect_daily_122_signals(
 
     signals: List[StratSignal] = []
 
+    logger.debug(
+        "Strat pattern context",
+        extra={
+            "symbol": symbol,
+            "daily_candles_count": len(daily_candles),
+            "t0_type": t0_type.value,
+            "t1_type": t1_type.value,
+            "weekly_bias": weekly_bias,
+            "c1_high": c1.high,
+            "c1_low": c1.low,
+            "c2_high": c2.high,
+            "c2_low": c2.low,
+            "underlying_price": underlying_price,
+        },
+    )
+
     if (
         t0_type == CandleType.TWO_UP
         and t1_type == CandleType.INSIDE
@@ -198,3 +214,8 @@ def detect_daily_122_signals(
         signals.append(signal)
 
     return signals
+
+
+# TODO: Add additional Strat detectors (e.g., detect_daily_212_signals,
+# detect_daily_inside_breakout_signals) and invoke them alongside
+# detect_daily_122_signals from scanner.py when ready.
