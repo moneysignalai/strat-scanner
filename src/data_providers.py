@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import logging
 from datetime import datetime, timedelta
-from typing import List, Optional
+from typing import List, Optional, Any
 
 from massive.rest import RESTClient
 
@@ -27,18 +27,41 @@ def _parse_timestamp(value: object) -> datetime:
     return datetime.utcnow()
 
 
-def _candle_from_agg(row: dict) -> Candle:
+def _get_field(row: Any, *names: str) -> Any:
+    """
+    Safely pull a field from either:
+    - dict (row["o"], row["c"], etc.)
+    - Massive Agg object (row.o, row.c, etc)
+    Returns None if nothing matches.
+    """
+    for name in names:
+        # dict-style
+        if isinstance(row, dict) and name in row:
+            return row[name]
+        # attribute-style
+        if hasattr(row, name):
+            return getattr(row, name)
+    return None
+
+
+def _candle_from_agg(row: Any) -> Candle:
+    """
+    Convert a Massive agg row (dict OR Agg object) into a Candle.
+    """
+    timestamp_raw = _get_field(row, "t", "timestamp", "time")
+    open_raw = _get_field(row, "o", "open")
+    high_raw = _get_field(row, "h", "high")
+    low_raw = _get_field(row, "l", "low")
+    close_raw = _get_field(row, "c", "close")
+    volume_raw = _get_field(row, "v", "volume")
+
     return Candle(
-        timestamp=_parse_timestamp(row.get("t") or row.get("timestamp")),
-        open=float(row.get("o") or row.get("open") or 0.0),
-        high=float(row.get("h") or row.get("high") or 0.0),
-        low=float(row.get("l") or row.get("low") or 0.0),
-        close=float(row.get("c") or row.get("close") or 0.0),
-        volume=(
-            float(row.get("v") or row.get("volume"))
-            if row.get("v") is not None or row.get("volume") is not None
-            else None
-        ),
+        timestamp=_parse_timestamp(timestamp_raw),
+        open=float(open_raw or 0.0),
+        high=float(high_raw or 0.0),
+        low=float(low_raw or 0.0),
+        close=float(close_raw or 0.0),
+        volume=float(volume_raw) if volume_raw is not None else None,
     )
 
 
