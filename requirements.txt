@@ -1,0 +1,3 @@
+massive
+python-dotenv
+requests

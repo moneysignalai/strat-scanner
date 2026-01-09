@@ -1,0 +1,24 @@
+services:
+  - type: worker
+    name: strat-scanner-bot
+    env: python
+    plan: starter
+    buildCommand: "pip install -r requirements.txt"
+    startCommand: "python -m src.worker"
+    envVars:
+      - key: MASSIVE_API_KEY
+        sync: false
+      - key: SCAN_TICKERS
+        sync: false
+      - key: TELEGRAM_BOT_TOKEN
+        sync: false
+      - key: TELEGRAM_CHAT_ID
+        sync: false
+      - key: LOG_LEVEL
+        value: INFO
+      - key: DEBUG_MODE
+        value: "false"
+      - key: SCAN_INTERVAL_SECONDS
+        value: "300"
+      - key: MAX_SIGNALS_PER_SCAN
+        value: "50"
