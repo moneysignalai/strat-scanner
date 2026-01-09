@@ -1,5 +1,5 @@
 """Alert formatting and dispatch utilities."""
-from datetime import datetime
+from datetime import datetime, timezone
 import logging
 from typing import Any, Dict
 from zoneinfo import ZoneInfo  # <-- added for EST timezone handling
@@ -18,7 +18,7 @@ def signal_to_alert_dict(signal: StratSignal) -> Dict[str, Any]:
     Timestamp is formatted in US/Eastern (America/New_York).
     """
     et = ZoneInfo("America/New_York")
-    now_pretty = signal.created_at.astimezone(et).strftime("%m-%d-%Y · %I:%M %p ET")
+    now_pretty = datetime.now(timezone.utc).astimezone(et).strftime("%m-%d-%Y · %I:%M %p ET")
 
     return {
         "timestamp": now_pretty,
