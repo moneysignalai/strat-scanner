@@ -107,6 +107,7 @@ def detect_daily_122_signals(
     """
     Detect bullish and bearish daily 1-2-2 continuation patterns with weekly bias.
     """
+    # Patterns are intentionally strict; most tickers will not trigger on a given day.
     if len(daily_candles) < 4:
         logger.debug(
             "Not enough candles for 1-2-2 detection",
