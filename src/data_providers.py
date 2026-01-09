@@ -5,6 +5,7 @@ import logging
 from datetime import datetime, timedelta
 from typing import List, Optional, Any
 
+import requests  # For direct HTTP call to Massive options snapshot endpoint
 from massive.rest import RESTClient
 
 from .config import get_settings
@@ -15,6 +16,7 @@ logger = logging.getLogger(__name__)
 
 def _parse_timestamp(value: object) -> datetime:
     if isinstance(value, (int, float)):
+        # Heuristic: treat very large ints as milliseconds, smaller as seconds
         if value > 10_000_000_000:
             return datetime.utcfromtimestamp(value / 1000)
         return datetime.utcfromtimestamp(value)
@@ -31,7 +33,7 @@ def _get_field(row: Any, *names: str) -> Any:
     """
     Safely pull a field from either:
     - dict (row["o"], row["c"], etc.)
-    - Massive Agg object (row.o, row.c, etc)
+    - Massive Agg object (row.o, row.c, etc.)
     Returns None if nothing matches.
     """
     for name in names:
@@ -74,6 +76,7 @@ class MassiveClient:
         settings = get_settings()
         if not settings.MASSIVE_API_KEY:
             raise RuntimeError("MASSIVE_API_KEY is not set")
+        self.settings = settings
         self.client = RESTClient(api_key=settings.MASSIVE_API_KEY)
 
     def get_stock_aggs_daily(self, ticker: str, days_back: int) -> List[Candle]:
@@ -99,7 +102,9 @@ class MassiveClient:
             candles = [_candle_from_agg(row) for row in rows]
             return sorted(candles, key=lambda c: c.timestamp)
         except Exception:
-            logger.exception("Failed to fetch daily aggregates", extra={"ticker": ticker})
+            logger.exception(
+                "Failed to fetch daily aggregates", extra={"ticker": ticker}
+            )
             return []
 
     def get_stock_aggs_weekly(self, ticker: str, weeks_back: int) -> List[Candle]:
@@ -125,7 +130,9 @@ class MassiveClient:
             candles = [_candle_from_agg(row) for row in rows]
             return sorted(candles, key=lambda c: c.timestamp)
         except Exception:
-            logger.exception("Failed to fetch weekly aggregates", extra={"ticker": ticker})
+            logger.exception(
+                "Failed to fetch weekly aggregates", extra={"ticker": ticker}
+            )
             return []
 
     def get_last_trade_price(self, ticker: str) -> Optional[float]:
@@ -136,10 +143,14 @@ class MassiveClient:
             if trade is None:
                 logger.warning("No last trade returned", extra={"ticker": ticker})
                 return None
+
+            # Handle dict-style responses
             if isinstance(trade, dict):
                 for key in ("price", "p", "last", "last_price"):
                     if key in trade and trade[key] is not None:
                         return float(trade[key])
+
+            # Handle attribute-style responses
             price = getattr(trade, "price", None) or getattr(trade, "p", None)
             return float(price) if price is not None else None
         except Exception:
@@ -147,28 +158,57 @@ class MassiveClient:
             return None
 
     def get_options_chain_snapshot(self, ticker: str) -> List[dict]:
-        """Fetch options chain snapshot for a ticker."""
+        """
+        Fetch options chain snapshot for a ticker.
+
+        Massive's Python REST client does not currently expose a
+        `get_options_chain_snapshot` method, so we call the HTTP endpoint
+        directly: /v3/snapshot/options/{underlyingTicker}?apiKey=...
+        """
         logger.info("Requesting options chain snapshot", extra={"ticker": ticker})
         try:
-            response = self.client.get_options_chain_snapshot(ticker)
-            if response is None:
-                logger.warning(
-                    "No options chain snapshot returned", extra={"ticker": ticker}
-                )
-                return []
-            if isinstance(response, dict):
-                results = response.get("results") or response.get("data") or []
-            elif isinstance(response, list):
-                results = response
+            base_url = "https://api.massive.com/v3/snapshot/options"
+            url = f"{base_url}/{ticker}"
+            params = {"apiKey": self.settings.MASSIVE_API_KEY}
+
+            resp = requests.get(url, params=params, timeout=10)
+            resp.raise_for_status()
+
+            data = resp.json()
+
+            if isinstance(data, dict):
+                results = data.get("results") or data.get("data") or []
+            elif isinstance(data, list):
+                results = data
             else:
-                results = list(response)
+                results = []
+
             if not results:
                 logger.warning(
                     "Empty options chain snapshot", extra={"ticker": ticker}
                 )
-            return results
+
+            normalized: List[dict] = []
+            for item in results:
+                if isinstance(item, dict):
+                    normalized.append(item)
+                else:
+                    # Fallback: best-effort conversion from objects to dicts
+                    normalized.append(
+                        {
+                            k: getattr(item, k)
+                            for k in dir(item)
+                            if not k.startswith("_")
+                            and not callable(getattr(item, k))
+                        }
+                    )
+
+            return normalized
+
         except Exception:
-            logger.exception("Failed to fetch options chain snapshot", extra={"ticker": ticker})
+            logger.exception(
+                "Failed to fetch options chain snapshot", extra={"ticker": ticker}
+            )
             return []
 
 
