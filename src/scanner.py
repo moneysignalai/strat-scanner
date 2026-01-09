@@ -1,6 +1,7 @@
 """Scanner orchestration for Strat signals."""
 from typing import Optional, Set
 import logging
+import random
 from datetime import datetime, date
 from zoneinfo import ZoneInfo
 
@@ -40,6 +41,7 @@ class Scanner:
         """
         tickers_str = self.settings.SCAN_TICKERS or ""
         tickers = [t.strip().upper() for t in tickers_str.split(",") if t.strip()]
+        random.shuffle(tickers)
         tickers_scanned = 0
         signals_detected = 0
         signals_alerted = 0
@@ -66,6 +68,14 @@ class Scanner:
         max_alerts_logged = False
 
         for ticker in tickers:
+            if signals_alerted >= self.settings.MAX_SIGNALS_PER_SCAN:
+                if not max_alerts_logged:
+                    logger.warning(
+                        "Max signals per scan reached; breaking ticker loop",
+                        extra={"max": self.settings.MAX_SIGNALS_PER_SCAN},
+                    )
+                    max_alerts_logged = True
+                break
             tickers_scanned += 1
             try:
                 logger.info("Scanning ticker", extra={"ticker": ticker})
@@ -107,7 +117,7 @@ class Scanner:
                     if signals_alerted >= self.settings.MAX_SIGNALS_PER_SCAN:
                         if not max_alerts_logged:
                             logger.warning(
-                                "Max signals per scan reached; skipping remaining",
+                                "Max signals per scan reached; breaking ticker loop",
                                 extra={"max": self.settings.MAX_SIGNALS_PER_SCAN},
                             )
                             max_alerts_logged = True
@@ -142,9 +152,11 @@ class Scanner:
                 "ticker_count": len(tickers),
                 "signals_count": len(all_signals),
                 "signal_tickers": sorted({s.symbol for s in all_signals}),
+                "unique_signal_ticker_count": len({s.symbol for s in all_signals}),
                 "tickers_scanned": tickers_scanned,
                 "signals_detected": signals_detected,
                 "signals_alerted": signals_alerted,
+                "signals_alerted_by_day_seen_cache_size": len(self._seen_signals),
                 "errors": errors,
             },
         )
