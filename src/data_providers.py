@@ -158,52 +158,62 @@ class MassiveClient:
             return None
 
     def get_options_chain_snapshot(self, ticker: str) -> List[dict]:
-        """
-        Fetch options chain snapshot for a ticker.
-
-        Massive's Python REST client does not currently expose a
-        `get_options_chain_snapshot` method, so we call the HTTP endpoint
-        directly: /v3/snapshot/options/{underlyingTicker}?apiKey=...
-        """
         logger.info("Requesting options chain snapshot", extra={"ticker": ticker})
+
+        settings = get_settings()
+        if not settings.MASSIVE_API_KEY:
+            logger.error(
+                "MASSIVE_API_KEY is not set; cannot fetch options chain",
+                extra={"ticker": ticker},
+            )
+            return []
+
+        base_url = "https://api.massive.com"
+        path = f"/v3/snapshot/options/{ticker}"
+
+        headers = {
+            "Authorization": f"Bearer {settings.MASSIVE_API_KEY}",
+            "Accept": "application/json",
+        }
+
+        all_results = []
+        next_url = f"{base_url}{path}"
+
         try:
-            base_url = "https://api.massive.com/v3/snapshot/options"
-            url = f"{base_url}/{ticker}"
-            params = {"apiKey": self.settings.MASSIVE_API_KEY}
+            while next_url:
+                resp = requests.get(next_url, headers=headers, timeout=10)
+                if resp.status_code != 200:
+                    logger.error(
+                        "Options chain HTTP error",
+                        extra={
+                            "ticker": ticker,
+                            "status_code": resp.status_code,
+                            "text": resp.text[:500],
+                        },
+                    )
+                    break
 
-            resp = requests.get(url, params=params, timeout=10)
-            resp.raise_for_status()
+                data = resp.json() or {}
+                page_results = data.get("results") or []
+                if not isinstance(page_results, list):
+                    logger.warning(
+                        "'results' is not a list",
+                        extra={"ticker": ticker, "type": type(page_results).__name__},
+                    )
+                    break
 
-            data = resp.json()
+                all_results.extend(page_results)
+                next_url = data.get("next_url") or None
 
-            if isinstance(data, dict):
-                results = data.get("results") or data.get("data") or []
-            elif isinstance(data, list):
-                results = data
+            if not all_results:
+                logger.warning("Empty options chain snapshot", extra={"ticker": ticker})
             else:
-                results = []
-
-            if not results:
-                logger.warning(
-                    "Empty options chain snapshot", extra={"ticker": ticker}
+                logger.info(
+                    "Options chain snapshot fetched",
+                    extra={"ticker": ticker, "contracts": len(all_results)},
                 )
 
-            normalized: List[dict] = []
-            for item in results:
-                if isinstance(item, dict):
-                    normalized.append(item)
-                else:
-                    # Fallback: best-effort conversion from objects to dicts
-                    normalized.append(
-                        {
-                            k: getattr(item, k)
-                            for k in dir(item)
-                            if not k.startswith("_")
-                            and not callable(getattr(item, k))
-                        }
-                    )
-
-            return normalized
+            return all_results
 
         except Exception:
             logger.exception(
