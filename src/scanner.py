@@ -1,5 +1,5 @@
 """Scanner orchestration for Strat signals."""
-from typing import Optional, Set
+from typing import Optional, Set, Dict
 import logging
 import random
 from datetime import datetime, date
@@ -25,6 +25,7 @@ class Scanner:
         self.settings = get_settings()
         self._seen_signals: Set[str] = set()
         self._current_seen_date: Optional[date] = None
+        self._symbol_last_alert_date: Dict[str, date] = {}
 
     def _current_et_date(self) -> date:
         return datetime.now(ZoneInfo("America/New_York")).date()
@@ -47,6 +48,7 @@ class Scanner:
         signals_alerted = 0
         errors = 0
         all_signals: list[StratSignal] = []
+        cooldown_days = self.settings.ALERT_COOLDOWN_DAYS
 
         today = self._current_et_date()
         if self._current_seen_date != today:
@@ -123,12 +125,30 @@ class Scanner:
                             max_alerts_logged = True
                         break
 
+                    symbol = signal.symbol
+                    if cooldown_days > 0:
+                        last_date = self._symbol_last_alert_date.get(symbol)
+                        if last_date is not None:
+                            days_since = (today - last_date).days
+                            if days_since < cooldown_days:
+                                logger.debug(
+                                    "Skipping signal due to symbol cooldown",
+                                    extra={
+                                        "symbol": symbol,
+                                        "last_alert_date": last_date.isoformat(),
+                                        "today": today.isoformat(),
+                                        "cooldown_days": cooldown_days,
+                                        "days_since": days_since,
+                                    },
+                                )
+                                continue
+
                     key = self._signal_key(signal, today)
                     if key in self._seen_signals:
                         logger.debug(
                             "Skipping duplicate signal for day",
                             extra={
-                                "ticker": signal.symbol,
+                                "ticker": symbol,
                                 "pattern": signal.pattern_name,
                                 "direction": signal.direction,
                             },
@@ -141,6 +161,7 @@ class Scanner:
                     send_signal_alert(signal)
                     self._seen_signals.add(key)
                     signals_alerted += 1
+                    self._symbol_last_alert_date[symbol] = today
 
             except Exception:
                 errors += 1
@@ -157,6 +178,7 @@ class Scanner:
                 "signals_detected": signals_detected,
                 "signals_alerted": signals_alerted,
                 "signals_alerted_by_day_seen_cache_size": len(self._seen_signals),
+                "cooldown_days": cooldown_days,
                 "errors": errors,
             },
         )

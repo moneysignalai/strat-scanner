@@ -39,6 +39,7 @@ class Settings:
     LOG_LEVEL: str = "INFO"
     DEBUG_MODE: bool = False
     MAX_SIGNALS_PER_SCAN: int = 50
+    ALERT_COOLDOWN_DAYS: int = 0
     ENVIRONMENT: str = "prod"
 
 
@@ -66,6 +67,9 @@ def get_settings() -> Settings:
         DEBUG_MODE=_env_bool(os.getenv("DEBUG_MODE"), False),
         MAX_SIGNALS_PER_SCAN=_env_int(
             os.getenv("MAX_SIGNALS_PER_SCAN"), 50
+        ),
+        ALERT_COOLDOWN_DAYS=_env_int(
+            os.getenv("ALERT_COOLDOWN_DAYS"), 0
         ),
         ENVIRONMENT=os.getenv("ENVIRONMENT", "prod"),
     )
