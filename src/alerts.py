@@ -2,6 +2,7 @@
 from datetime import datetime
 import logging
 from typing import Any, Dict
+from zoneinfo import ZoneInfo  # <-- added for EST timezone handling
 
 import requests
 
@@ -14,10 +15,14 @@ logger = logging.getLogger(__name__)
 def signal_to_alert_dict(signal: StratSignal) -> Dict[str, Any]:
     """
     Convert a StratSignal into a canonical alert dict for logging or downstream use.
+    Timestamp is formatted in US/Eastern (America/New_York).
     """
-    now_iso = datetime.utcnow().isoformat() + "Z"
+    now_est = datetime.now(ZoneInfo("America/New_York"))
+    # Example: "Jan 09, 2026 · 08:37 PM ET"
+    now_pretty = now_est.strftime("%b %d, %Y · %I:%M %p ET")
+
     return {
-        "timestamp": now_iso,
+        "timestamp": now_pretty,
         "symbol": signal.symbol,
         "direction": signal.direction,
         "pattern_name": signal.pattern_name,
