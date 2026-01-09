@@ -77,6 +77,7 @@ class MassiveClient:
         if not settings.MASSIVE_API_KEY:
             raise RuntimeError("MASSIVE_API_KEY is not set")
         self.settings = settings
+        self.api_key = settings.MASSIVE_API_KEY
         self.client = RESTClient(api_key=settings.MASSIVE_API_KEY)
 
     def get_stock_aggs_daily(self, ticker: str, days_back: int) -> List[Candle]:
@@ -160,28 +161,44 @@ class MassiveClient:
     def get_options_chain_snapshot(self, ticker: str) -> List[dict]:
         logger.info("Requesting options chain snapshot", extra={"ticker": ticker})
 
-        settings = get_settings()
-        if not settings.MASSIVE_API_KEY:
+        if not self.api_key:
             logger.error(
                 "MASSIVE_API_KEY is not set; cannot fetch options chain",
                 extra={"ticker": ticker},
             )
             return []
 
-        base_url = "https://api.massive.com"
-        path = f"/v3/snapshot/options/{ticker}"
+        base_url = "https://api.massive.com/v3/snapshot/options"
 
-        headers = {
-            "Authorization": f"Bearer {settings.MASSIVE_API_KEY}",
-            "Accept": "application/json",
-        }
+        def _get_value(obj: Any, key: str) -> Any:
+            if isinstance(obj, dict):
+                return obj.get(key)
+            return getattr(obj, key, None)
 
-        all_results = []
-        next_url = f"{base_url}{path}"
+        def _build_next_url(url: str) -> str:
+            if url.startswith("/"):
+                url = f"https://api.massive.com{url}"
+            if "apiKey=" in url:
+                return url
+            separator = "&" if "?" in url else "?"
+            return f"{url}{separator}apiKey={self.api_key}"
+
+        raw_results: List[Any] = []
+        next_url: Optional[str] = f"{base_url}/{ticker}"
+        params = {"limit": 250, "apiKey": self.api_key}
+        max_pages = 5
 
         try:
-            while next_url:
-                resp = requests.get(next_url, headers=headers, timeout=10)
+            for page in range(max_pages):
+                if not next_url:
+                    break
+                request_url = next_url
+                request_params = (
+                    params if page == 0 and "apiKey=" not in next_url else None
+                )
+                if page > 0:
+                    request_url = _build_next_url(next_url)
+                resp = requests.get(request_url, params=request_params, timeout=10)
                 if resp.status_code != 200:
                     logger.error(
                         "Options chain HTTP error",
@@ -202,19 +219,43 @@ class MassiveClient:
                     )
                     break
 
-                all_results.extend(page_results)
+                raw_results.extend(page_results)
                 next_url = data.get("next_url") or None
 
-            if not all_results:
-                logger.warning("Empty options chain snapshot", extra={"ticker": ticker})
-            else:
-                logger.info(
-                    "Options chain snapshot fetched",
-                    extra={"ticker": ticker, "contracts": len(all_results)},
+            normalized: List[dict] = []
+            for option in raw_results:
+                details = _get_value(option, "details")
+                if not details:
+                    continue
+                contract_type = _get_value(details, "contract_type")
+                expiration_date = _get_value(details, "expiration_date")
+                strike_price = _get_value(details, "strike_price")
+                if not contract_type or not expiration_date or strike_price is None:
+                    continue
+                symbol = _get_value(details, "ticker") or _get_value(option, "ticker")
+                last_quote = _get_value(option, "last_quote") or {}
+                normalized.append(
+                    {
+                        "symbol": symbol,
+                        "contract_type": contract_type,
+                        "strike_price": strike_price,
+                        "expiration_date": expiration_date,
+                        "open_interest": _get_value(option, "open_interest"),
+                        "bid_price": _get_value(last_quote, "bid"),
+                        "ask_price": _get_value(last_quote, "ask"),
+                        "implied_vol": _get_value(option, "implied_volatility"),
+                    }
                 )
 
-            return all_results
-
+            logger.info(
+                "Options chain snapshot fetched",
+                extra={
+                    "ticker": ticker,
+                    "raw_count": len(raw_results),
+                    "normalized_count": len(normalized),
+                },
+            )
+            return normalized
         except Exception:
             logger.exception(
                 "Failed to fetch options chain snapshot", extra={"ticker": ticker}
