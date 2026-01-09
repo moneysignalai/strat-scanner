@@ -8,7 +8,7 @@ from zoneinfo import ZoneInfo
 from .config import get_settings
 from .data_providers import MassiveClient
 from .models import StratSignal
-from .strat_logic import detect_daily_122_signals
+from .strat_logic import detect_daily_strat_signals
 from .options_picker import pick_option_for_signal
 from .alerts import send_signal_alert
 
@@ -49,6 +49,7 @@ class Scanner:
         errors = 0
         all_signals: list[StratSignal] = []
         cooldown_days = self.settings.ALERT_COOLDOWN_DAYS
+        symbols_alerted_this_scan: Set[str] = set()
 
         today = self._current_et_date()
         if self._current_seen_date != today:
@@ -103,8 +104,7 @@ class Scanner:
                     )
                     continue
 
-                signals = detect_daily_122_signals(ticker, daily, weekly, last_price)
-                signals_detected += len(signals)
+                signals = detect_daily_strat_signals(ticker, daily, weekly, last_price)
                 all_signals.extend(signals)
 
                 if signals:
@@ -126,6 +126,15 @@ class Scanner:
                         break
 
                     symbol = signal.symbol
+                    if symbol in symbols_alerted_this_scan:
+                        logger.debug(
+                            "Skipping signal because symbol already alerted this scan",
+                            extra={
+                                "symbol": symbol,
+                                "pattern_name": signal.pattern_name,
+                            },
+                        )
+                        continue
                     if cooldown_days > 0:
                         last_date = self._symbol_last_alert_date.get(symbol)
                         if last_date is not None:
@@ -161,7 +170,9 @@ class Scanner:
                     send_signal_alert(signal)
                     self._seen_signals.add(key)
                     signals_alerted += 1
+                    signals_detected += 1
                     self._symbol_last_alert_date[symbol] = today
+                    symbols_alerted_this_scan.add(symbol)
 
             except Exception:
                 errors += 1
@@ -174,6 +185,8 @@ class Scanner:
                 "signals_count": len(all_signals),
                 "signal_tickers": sorted({s.symbol for s in all_signals}),
                 "unique_signal_ticker_count": len({s.symbol for s in all_signals}),
+                "unique_signal_tickers": len({s.symbol for s in all_signals}),
+                "patterns_used": sorted({s.pattern_name for s in all_signals}),
                 "tickers_scanned": tickers_scanned,
                 "signals_detected": signals_detected,
                 "signals_alerted": signals_alerted,
