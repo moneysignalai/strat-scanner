@@ -22,6 +22,24 @@ def _parse_expiration(value: object) -> datetime | None:
     return None
 
 
+def _parse_float(value: object) -> float | None:
+    if value is None:
+        return None
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def _parse_int(value: object) -> int | None:
+    if value is None:
+        return None
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return None
+
+
 def pick_option_for_signal(
     signal: StratSignal,
     options_chain: List[dict],
@@ -196,6 +214,23 @@ def pick_option_for_signal(
     )
 
     chosen = filtered[0]
+    oi_val = chosen.get("_parsed_oi")
+    if oi_val is None:
+        oi_val = _parse_int(chosen.get("open_interest")) or _parse_int(chosen.get("oi"))
+    volume_val = _parse_int(chosen.get("volume")) or _parse_int(chosen.get("v"))
+    delta_val = _parse_float(chosen.get("delta"))
+    raw_iv = (
+        chosen.get("implied_vol")
+        if chosen.get("implied_vol") is not None
+        else chosen.get("implied_volatility")
+    )
+    if raw_iv is None:
+        raw_iv = chosen.get("iv")
+    iv_val = _parse_float(raw_iv)
+    iv_pct = None
+    if iv_val is not None:
+        iv_pct = iv_val * 100.0 if iv_val <= 1 else iv_val
+
     signal.option_ticker = chosen.get("symbol")
     signal.option_strike = chosen.get("_parsed_strike")
     expiration = chosen.get("_parsed_expiration")
@@ -203,11 +238,11 @@ def pick_option_for_signal(
     signal.option_type = desired_type
     signal.option_bid = chosen.get("_parsed_bid")
     signal.option_ask = chosen.get("_parsed_ask")
-    signal.option_iv = (
-        float(chosen.get("implied_vol"))
-        if chosen.get("implied_vol") is not None
-        else None
-    )
+    signal.option_iv = iv_val
+    signal.option_open_interest = oi_val
+    signal.option_volume = volume_val
+    signal.option_delta = delta_val
+    signal.option_iv_pct = iv_pct
 
     logger.info(
         "Option contract selected",
@@ -219,7 +254,7 @@ def pick_option_for_signal(
             "expiration": signal.option_expiration,
             "bid": signal.option_bid,
             "ask": signal.option_ask,
-            "oi": chosen.get("_parsed_oi"),
+            "oi": oi_val,
         },
     )
 

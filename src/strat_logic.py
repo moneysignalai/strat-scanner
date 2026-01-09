@@ -1,10 +1,66 @@
 """Strat pattern detection logic."""
-from typing import List
+from typing import List, Optional
 import logging
 
 from .models import Candle, CandleType, StratSignal
 
 logger = logging.getLogger(__name__)
+
+VOLUME_LOOKBACK_DAYS = 20
+
+
+def _calculate_pct_to_entry(
+    current_price: Optional[float], entry: Optional[float]
+) -> Optional[float]:
+    if current_price is None or entry in (None, 0):
+        return None
+    try:
+        return ((current_price - entry) / entry) * 100.0
+    except (TypeError, ZeroDivisionError):
+        return None
+
+
+def _calculate_risk_reward(
+    direction: str,
+    entry: Optional[float],
+    stop: Optional[float],
+    current_price: Optional[float],
+) -> Optional[float]:
+    if entry is None or stop is None or current_price is None:
+        return None
+    try:
+        risk = abs(entry - stop)
+    except TypeError:
+        return None
+    if risk <= 0:
+        return None
+    if direction == "CALL":
+        reward = max(current_price, entry) - stop
+    else:
+        reward = entry - min(current_price, entry)
+    if reward <= 0:
+        return None
+    return reward / risk
+
+
+def _calculate_volume_vs_avg_pct(daily_candles: List[Candle]) -> Optional[float]:
+    if len(daily_candles) <= VOLUME_LOOKBACK_DAYS:
+        return None
+    today = daily_candles[-1]
+    if today.volume is None:
+        return None
+    prior = daily_candles[-(VOLUME_LOOKBACK_DAYS + 1) : -1]
+    volumes: List[float] = []
+    for candle in prior:
+        if candle.volume is None or candle.volume <= 0:
+            return None
+        volumes.append(candle.volume)
+    if len(volumes) < VOLUME_LOOKBACK_DAYS:
+        return None
+    avg_volume = sum(volumes) / len(volumes)
+    if avg_volume <= 0:
+        return None
+    return ((today.volume - avg_volume) / avg_volume) * 100.0
 
 
 def classify_candle_type(current: Candle, previous: Candle) -> CandleType:
@@ -74,6 +130,10 @@ def detect_daily_122_signals(
         and weekly_bias == "up"
         and c2.high > c1.high
     ):
+        current_price = underlying_price or c2.close
+        pct_to_entry = _calculate_pct_to_entry(current_price, c1.high)
+        risk_reward = _calculate_risk_reward("CALL", c1.high, c1.low, current_price)
+        volume_vs_avg_pct = _calculate_volume_vs_avg_pct(daily_candles)
         signal = StratSignal(
             symbol=symbol,
             direction="CALL",
@@ -83,7 +143,10 @@ def detect_daily_122_signals(
             entry_level=c1.high,
             stop_level=c1.low,
             target_level=None,
-            underlying_price=underlying_price or c2.close,
+            underlying_price=current_price,
+            pct_to_entry=pct_to_entry,
+            risk_reward=risk_reward,
+            volume_vs_avg_pct=volume_vs_avg_pct,
         )
         logger.debug(
             "Strat signal detected",
@@ -103,6 +166,10 @@ def detect_daily_122_signals(
         and weekly_bias == "down"
         and c2.low < c1.low
     ):
+        current_price = underlying_price or c2.close
+        pct_to_entry = _calculate_pct_to_entry(current_price, c1.low)
+        risk_reward = _calculate_risk_reward("PUT", c1.low, c1.high, current_price)
+        volume_vs_avg_pct = _calculate_volume_vs_avg_pct(daily_candles)
         signal = StratSignal(
             symbol=symbol,
             direction="PUT",
@@ -112,7 +179,10 @@ def detect_daily_122_signals(
             entry_level=c1.low,
             stop_level=c1.high,
             target_level=None,
-            underlying_price=underlying_price or c2.close,
+            underlying_price=current_price,
+            pct_to_entry=pct_to_entry,
+            risk_reward=risk_reward,
+            volume_vs_avg_pct=volume_vs_avg_pct,
         )
         logger.debug(
             "Strat signal detected",

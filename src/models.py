@@ -45,3 +45,10 @@ class StratSignal:
     option_bid: Optional[float] = None
     option_ask: Optional[float] = None
     option_iv: Optional[float] = None
+    pct_to_entry: Optional[float] = None
+    risk_reward: Optional[float] = None
+    volume_vs_avg_pct: Optional[float] = None
+    option_open_interest: Optional[int] = None
+    option_volume: Optional[int] = None
+    option_delta: Optional[float] = None
+    option_iv_pct: Optional[float] = None
